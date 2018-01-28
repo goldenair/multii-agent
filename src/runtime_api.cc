@@ -88,7 +88,7 @@ int env_render(EnvHandle game) {
 int env_render_next_file(EnvHandle game) {
     LOG(TRACE) << "env render next file.  ";
     // temporally only needed in DiscreteSnake
-    ((::magent::discrete_snake::DiscreteSnake *)game)->render_next_file();
+    ((::magent::trans_city::TransCity *)game)->render_next_file();
     return 0;
 }
 

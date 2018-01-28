@@ -27,7 +27,7 @@ typedef enum {ACT_RIGHT, ACT_DOWN, ACT_LEFT, ACT_UP, ACT_NOOP, ACT_NUM} Action;
 
 enum {CHANNEL_WALL, CHANNEL_LIGHT, CHANNEL_PARK, CHANNEL_SELF, CHANNEL_OTHER, CHANNEL_NUM};
 
-const int MAX_COLOR_NUM = 16;
+const int MAX_COLOR_NUM = 20;
 
 typedef float Reward;
 

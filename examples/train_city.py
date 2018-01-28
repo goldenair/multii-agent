@@ -37,11 +37,13 @@ def generate_map(env, map_size, handles):
 
     road_width = 4
     road_height = road_width
-    num_park = 12
-    car_dense = 0.1
+    num_park = 20
+    car_dense = 0.08
+    max_building_width = 8
+    block_dense = 0.4
 
     width_margin = -1
-    for width in range(3, 5):
+    for width in range(max_building_width - 2, max_building_width):
         current_margin = (map_size - 2 - road_width) % (width + road_width)
         if current_margin % 2 == 0:
             if current_margin <= 2:
@@ -53,7 +55,7 @@ def generate_map(env, map_size, handles):
                 build_width = width
 
     height_margin = -1
-    for height in range(3, 5):
+    for height in range(max_building_width - 2, max_building_width):
         current_margin = (map_size - 2 - road_width) % (height + road_width)
         if current_margin % 2 == 0:
             if current_margin <= 2:
@@ -120,7 +122,7 @@ def generate_map(env, map_size, handles):
         delblock(x, y)
 
     extra_block = []
-    block_num = int(len(build_pos.keys()) * 0.3)
+    block_num = int(len(build_pos.keys()) * block_dense)
     for _ in range(block_num):
         while True:
             x = random.randint(0, width_num - 2) * (build_width + road_width) + width_margin + road_width + 1
@@ -128,6 +130,8 @@ def generate_map(env, map_size, handles):
             if (x, y, build_width, build_height) in build_pos:
                 break
         if random.random() <= 0.5:
+            if (x + road_width + build_width, y, build_width, build_height) not in build_pos.keys():
+                continue
             extra_block.append([x + build_width, y, road_width, build_height])
             banned.setdefault((x - 1 + build_width, y - 1 + build_height), [False] * 8)
             banned[(x - 1 + build_width, y - 1 + build_height)][0] = True
@@ -135,6 +139,8 @@ def generate_map(env, map_size, handles):
             banned.setdefault((x - 1 + build_width, y - 1 + build_height), [False] * 8)
             banned[(x - 1 + build_width, y - 1 + build_height)][2] = True
         else:
+            if (x, y + build_height + road_height, build_width, build_height) not in build_pos.keys():
+                continue
             extra_block.append([x, y + build_height, build_width, road_height])
             banned.setdefault((x - 1 + build_width, y - 1 + build_height), [False] * 8)
             banned[(x - 1 + build_width, y - 1 + build_height)][3] = True
@@ -166,7 +172,7 @@ def generate_map(env, map_size, handles):
         for y in range(height_margin + road_height + 1,
                        map_size - road_height - height_margin, build_height + road_height):
             if x - 1 + build_width * 2 + road_width * 2 + width_margin < map_size and \
-                    y - 1 + build_height * 2 + road_height * 2 + height_margin < map_size:
+                                                            y - 1 + build_height * 2 + road_height * 2 + height_margin < map_size:
                 status = get_status(banned[(x - 1 + build_width, y - 1 + build_height)])
                 if sum(status) == 0:
                     continue
@@ -176,8 +182,21 @@ def generate_map(env, map_size, handles):
                 assert res != 0
                 light_pos.append([x - 1 + build_width, y - 1 + build_height, road_width + 1, road_height + 1, res])
 
+    park_available_pos = []
+    for pos in build_pos:
+        available = False
+        if (pos[0] + build_width + road_width, pos[1], pos[2], pos[3]) not in build_pos:
+            available = True
+        if (pos[0] - build_width - road_width, pos[1], pos[2], pos[3]) not in build_pos:
+            available = True
+        if (pos[0], pos[1] - build_height - road_height, pos[2], pos[3]) not in build_pos:
+            available = True
+        if (pos[0], pos[1] + build_height + road_height, pos[2], pos[3]) not in build_pos:
+            available = True
+        if available:
+            park_available_pos.append(pos)
+    parks_id = np.random.choice(range(len(park_available_pos)), size=num_park, replace=False)
     build_pos = build_pos.keys() + extra_block
-    parks_id = np.random.choice(range(len(build_pos)), size=num_park, replace=False)
 
     def f(loc):
         return loc[0] + loc[2] < map_size and loc[1] + loc[3] < map_size
@@ -192,24 +211,51 @@ def generate_map(env, map_size, handles):
             for y in range(y0, y0 + h):
                 filled.add((x, y))
 
-    n = map_size * map_size * car_dense
-    agent_pos = get_random_pos(map_size, filled, n)
+    def get_park(p):
+        result = [p[0], p[1], p[2], p[3]]
+        modified = False
+        if [p[0] + build_width, p[1], road_width, build_height] in extra_block:
+            result[2] += road_width
+            modified = True
+        if [p[0] - road_width, p[1], road_width, build_height] in extra_block:
+            result[0] -= road_width
+            result[2] += road_width
+            modified = True
+        if not modified:
+            if [p[0], p[1] + build_height, build_width, road_height] in extra_block:
+                result[3] += road_height
+            if [p[0], p[1] - road_height, build_width, road_height] in extra_block:
+                result[1] -= road_height
+                result[3] += road_height
+        return result
 
     env.add_buildings(method="custom", pos=build_pos)
-    env.add_parks(method='custom', pos=[build_pos[i] for i in parks_id])
+    env.add_parks(method='custom', pos=[get_park(park_available_pos[i]) for i in parks_id])
     env.add_traffic_lights(method="custom", pos=light_pos)
-    env.add_agents(method="custom", pos=agent_pos)
 
-    return map_size, filled
+    n = map_size * map_size * car_dense
+    env.add_agents(method="random", n=n)
+
+    return filled, n
 
 
-def get_random_pos(map_size, filled, n):
+def get_enter_pos(map_size, filled, n, width=8):
     ret = []
     i = 0
+
+    enters = []
+    for x in range(1, map_size - 1):
+        for y in range(1, width):
+            enters.append([x, y])
+            enters.append([y, x])
+        for y in range(map_size - width - 1, map_size - 1):
+            enters.append([x, y])
+            enters.append([y, x])
+
     while i < n:
-        x, y = np.random.randint(1, map_size - 1), np.random.randint(1, map_size - 1)
+        x, y = enters[np.random.choice(range(len(enters)))]
         while (x, y) in filled:
-            x, y = np.random.randint(1, map_size - 1), np.random.randint(1, map_size - 1)
+            x, y = enters[np.random.choice(range(len(enters)))]
 
         ret.append([x, y])
         i += 1
@@ -218,10 +264,7 @@ def get_random_pos(map_size, filled, n):
 
 def play_a_round(env, map_size, handles, models, print_every, train=True, render=False, eps=None):
     env.reset()
-
-    map_size, filled = generate_map(env, map_size, handles)
-    # stat info
-    init_nums = [env.get_num(handle) for handle in handles]
+    filled, max_car_num = generate_map(env, map_size, handles)
 
     step_ct = 0
     done = False
@@ -238,6 +281,9 @@ def play_a_round(env, map_size, handles, models, print_every, train=True, render
     print("eps %.2f number %s" % (eps, nums))
     start_time = time.time()
     while not done:
+        # stat info
+        begin_nums = [env.get_num(handle) for handle in handles]
+
         # take actions for every model
         for i in range(n):
             obs[i] = env.get_observation(handles[i])
@@ -263,18 +309,21 @@ def play_a_round(env, map_size, handles, models, print_every, train=True, render
         if render:
             env.render()
 
-        # stat info
-        nums = [env.get_num(handle) for handle in handles]
-
         # clear dead agents
         env.clear_dead()
 
+        # stat info
+        nums = [env.get_num(handle) for handle in handles]
+
         # add new cars
-        env.add_agents(method="random", n=init_nums[0] - nums[0])
+        if nums[0] < max_car_num:
+            env.add_agents(method="custom", pos=get_enter_pos(map_size, filled,
+                                                              max_car_num - nums[0]))
 
         if step_ct % print_every == 0:
-            print("step %3d,  nums: %s reward: %s,  total_reward: %s " %
-                  (step_ct, nums, np.around(step_reward, 2), np.around(total_reward, 2)))
+            print("step %3d,  nums: %s reward: %s,  total_reward: %s  enter: %d" %
+                  (step_ct, nums, np.around(step_reward, 2), np.around(total_reward, 2),
+                   sum(begin_nums) - sum(nums)))
         step_ct += 1
         if step_ct > 300:
             break
@@ -305,7 +354,7 @@ if __name__ == "__main__":
     parser.add_argument("--render", action="store_true")
     parser.add_argument("--load_from", type=int)
     parser.add_argument("--train", action="store_true")
-    parser.add_argument("--map_size", type=int, default=101)
+    parser.add_argument("--map_size", type=int, default=201)
     parser.add_argument("--greedy", action="store_true")
     parser.add_argument("--name", type=str, default="city")
     parser.add_argument("--eval", action="store_true")
@@ -329,7 +378,7 @@ if __name__ == "__main__":
     models = []
     models.append(DeepQNetwork(env, handles[0], "cars",
                                batch_size=batch_size,
-                               memory_size=2 ** 20, target_update=target_update,
+                               memory_size=2 ** 21, target_update=target_update,
                                train_freq=train_freq))
 
     # load if

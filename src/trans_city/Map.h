@@ -47,6 +47,10 @@ public:
     /**
      * Utility
      */
+    bool is_blank(Position pos) {
+        return slots[pos2int(pos)].occ_type == OCC_NONE;
+    }
+
     bool in_board(int x, int y) const {
         return x >= 0 && x < map_width && y >= 0 && y < map_height;
     }

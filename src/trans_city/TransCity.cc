@@ -191,13 +191,17 @@ void TransCity::add_object(int obj_id, int n, const char *method, const int *lin
                 int color = static_cast<int>(random_engine()) % num_park;
                 int x, y, w, h;
                 std::tie(x, y, w, h) = parks[color].get_location();
+                Position pos = Position{buf.at(i, 0), buf.at(i, 1)};
                 Position goal{x + w/2, y + h/2};
 
                 Agent *agent = new Agent(id_counter, color, goal);
 
-                agent->set_pos(Position{buf.at(i, 0), buf.at(i, 1)});
-                map.add_agent(agent);
-                agents.push_back(agent);
+                agent->set_pos(pos);
+
+                if (map.is_blank(pos)) {
+                    map.add_agent(agent);
+                    agents.push_back(agent);
+                }
             }
         } else {
             LOG(FATAL) << "unsupported method in TransCity::add_object: " << method;
