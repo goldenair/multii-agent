@@ -23,7 +23,7 @@ def get_config(map_size):
     cfg = gw.Config()
 
     cfg.set({"map_width": map_size, "map_height": map_size})
-    cfg.set({"view_width": 13, "view_height": 13})
+    cfg.set({"view_width": 9, "view_height": 9})
     cfg.set({"embedding_size": 10})
     cfg.set({"reward_scale": 2})
 
@@ -193,26 +193,35 @@ def generate_map(env, map_size, handles):
                 filled.add((x, y))
 
     n = map_size * map_size * car_dense
-    agent_pos = []
-    i = 0
-    while i < n:
-        x, y = np.random.randint(1, map_size - 1), np.random.randint(1, map_size - 1)
-        while (x, y) in filled:
-            x, y = np.random.randint(1, map_size - 1), np.random.randint(1, map_size - 1)
-
-        agent_pos.append([x, y])
-        i += 1
+    agent_pos = get_random_pos(map_size, filled, n)
 
     env.add_buildings(method="custom", pos=build_pos)
     env.add_parks(method='custom', pos=[build_pos[i] for i in parks_id])
     env.add_traffic_lights(method="custom", pos=light_pos)
     env.add_agents(method="custom", pos=agent_pos)
 
+    return map_size, filled
+
+
+def get_random_pos(map_size, filled, n):
+    ret = []
+    i = 0
+    while i < n:
+        x, y = np.random.randint(1, map_size - 1), np.random.randint(1, map_size - 1)
+        while (x, y) in filled:
+            x, y = np.random.randint(1, map_size - 1), np.random.randint(1, map_size - 1)
+
+        ret.append([x, y])
+        i += 1
+    return ret
+
 
 def play_a_round(env, map_size, handles, models, print_every, train=True, render=False, eps=None):
     env.reset()
 
-    generate_map(env, map_size, handles)
+    map_size, filled = generate_map(env, map_size, handles)
+    # stat info
+    init_nums = [env.get_num(handle) for handle in handles]
 
     step_ct = 0
     done = False
@@ -232,10 +241,6 @@ def play_a_round(env, map_size, handles, models, print_every, train=True, render
         # take actions for every model
         for i in range(n):
             obs[i] = env.get_observation(handles[i])
-            # pos = env.get_pos(handles[i])
-            # id = 1
-            # print(pos[id])
-            # print(obs[i][0][id][:,:,0])
             ids[i] = env.get_agent_id(handles[i])
             acts[i] = models[i].infer_action(obs[i], ids[i], 'e_greedy', eps=eps)
             env.set_action(handles[i], acts[i])
@@ -263,6 +268,9 @@ def play_a_round(env, map_size, handles, models, print_every, train=True, render
 
         # clear dead agents
         env.clear_dead()
+
+        # add new cars
+        env.add_agents(method="random", n=init_nums[0] - nums[0])
 
         if step_ct % print_every == 0:
             print("step %3d,  nums: %s reward: %s,  total_reward: %s " %
@@ -343,7 +351,7 @@ if __name__ == "__main__":
     start = time.time()
     for k in range(start_from, start_from + args.n_round):
         tic = time.time()
-        eps = magent.utility.piecewise_decay(k, [0, 700, 1400], [1, 0.2, 0.05]) if not args.greedy else 0
+        eps = magent.utility.piecewise_decay(k, [0, 200, 500], [1, 0.2, 0.1]) if not args.greedy else 0
         loss, num, reward, value = play_a_round(env, args.map_size, handles, models,
                                                 train=args.train, print_every=50,
                                                 render=args.render or (k + 1) % args.render_every == 0,

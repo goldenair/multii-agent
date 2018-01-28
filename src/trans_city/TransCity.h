@@ -61,13 +61,13 @@ private:
     Map map;
     std::vector<Agent*> agents;
     std::vector<TrafficLight> lights;
+    std::map<std::pair<Position, Position>, TrafficLine> lines;
     std::vector<Park> parks;
     std::vector<Position> walls;
     std::vector<Building> buildings;
     std::default_random_engine random_engine;
     int num_park{0};
 
-    std::map<std::pair<Position, Position>, TrafficLine> lines;
 
     int id_counter{0};
 

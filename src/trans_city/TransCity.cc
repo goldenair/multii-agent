@@ -31,14 +31,20 @@ TransCity::~TransCity() {
 void TransCity::reset() {
     id_counter = 0;
 
+
+    lights.clear();
+    lines.clear();
+    parks.clear();
+    walls.clear();
+    buildings.clear();
+
     map.reset(walls, width, height);
+    render_generator.next_file();
 
     for (int i = 0; i < agents.size(); i++) {
         delete agents[i];
     }
     agents.clear();
-    lights.clear();
-    parks.clear();
 }
 
 void TransCity::set_config(const char *key, void *p_value) {
@@ -271,7 +277,7 @@ void TransCity::step(int *done) {
         Action act = agent->get_action();
 
         agent->add_reward(static_cast<float>(reward_scale *
-                (width + height - fabs(pos.x - goal.x) - fabs(pos.y - goal.y)) / (width + height)));
+                (-fabs(pos.x - goal.x) - fabs(pos.y - goal.y)) / (width + height)) - 0.5f * reward_scale);
 
         if (act > ACT_UP)
             continue;
@@ -283,6 +289,8 @@ void TransCity::step(int *done) {
             agent->set_dead();
         }
     }
+
+    *done = 0;
 }
 
 void TransCity::get_reward(GroupHandle group, float *buffer) {

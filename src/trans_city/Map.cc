@@ -176,10 +176,13 @@ int Map::do_move(Agent *agent, const int *delta,
         agent->set_pos(new_pos);
         return 0;
     } else if (slots[pos2int(new_pos)].occ_type == OCC_PARK) {
-        if (reinterpret_cast<long>(slots[pos2int(new_pos)].occupier) == agent->get_color())
+        if (reinterpret_cast<long>(slots[pos2int(new_pos)].occupier) == agent->get_color()) {
+            slots[pos2int(pos)].occ_type = OCC_NONE;
             return 1;
-        else
+        }
+        else {
             return -2;
+        }
     } else {
         return -3;
     }
