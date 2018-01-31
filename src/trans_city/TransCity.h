@@ -55,7 +55,8 @@ private:
     int view_width, view_height;
     int embedding_size;
     int interval_max, interval_min;
-    float reward_scale;
+    float reward_scale, ban_penalty;
+    bool dis_inited{false};
 
     // game status: map, agent,
     Map map;
@@ -65,8 +66,11 @@ private:
     std::vector<Park> parks;
     std::vector<Position> walls;
     std::vector<Building> buildings;
+    std::vector<Road> roads;
     std::default_random_engine random_engine;
     int num_park{0};
+
+    std::vector<std::vector<int> > distants;
 
 
     int id_counter{0};
@@ -137,11 +141,23 @@ public:
             pos(p), width(w), height(h) {
     }
 
-    std::tuple<int, int, int, int> get_location() { return std::make_tuple(pos.x, pos.y, width, height); }
+    std::tuple<int, int, int, int> get_location() const { return std::make_tuple(pos.x, pos.y, width, height); }
 
 private:
     Position pos;
-    int width, height, interval;
+    int width, height;
+};
+
+class Road {
+public:
+    Road(Position p, int w, int h, int d):
+            pos(p), width(w), height(h), dir(d) {
+    }
+    std::tuple<int, int, int, int> get_location() const { return std::make_tuple(pos.x, pos.y, width, height); }
+    int get_dir() const { return dir; }
+private:
+    Position pos;
+    int width, height, dir; // dir == 0 for horizontal, 1 for vertical
 };
 
 
@@ -188,9 +204,9 @@ public:
     void set_goal(Position center) { goal = center; }
 
     void set_dead() { dead = true; }
-    bool is_dead()  { return dead; }
+    bool is_dead()  const { return dead; }
 
-    int get_color() { return color; }
+    int get_color() const { return color; }
 
 private:
     int id;

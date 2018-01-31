@@ -121,7 +121,8 @@ void RenderGenerator::render_a_frame(const std::vector<Agent *> &agents,
                                      const std::vector<Position> &walls,
                                      const std::vector<TrafficLight> &lights,
                                      const std::vector<Park> &parks,
-                                     const std::vector<Building> &buildings) {
+                                     const std::vector<Building> &buildings,
+                                     const std::vector<Road> &roads) {
     if (save_dir == "")
         return;
 
@@ -135,6 +136,7 @@ void RenderGenerator::render_a_frame(const std::vector<Agent *> &agents,
     std::string light_tower_colors[] = {
             " 250 250 200"
     };
+    std::string road_line_color = " 0 0 255";
     std::string white_color = " 255 255 255";
 
 
@@ -170,7 +172,7 @@ void RenderGenerator::render_a_frame(const std::vector<Agent *> &agents,
 
     fout << "F" << " " << agents.size()
                 << " " << 0                  // attack
-                << " " << lights.size() * 2  // light lines
+                << " " << lights.size() * 2 + roads.size()  // light lines + double road line
                 << " " << buildings.size() + n_light_tower + parks.size() // rectangle
                 << " " << 0                  // food
                 << std::endl;
@@ -188,8 +190,8 @@ void RenderGenerator::render_a_frame(const std::vector<Agent *> &agents,
     // draw lines
     for (auto light : lights) {
         int status = light.get_status();
-        int x, y, w, h;
         int mask = light.get_mask();
+        int x, y, w, h;
         std::tie(x, y, w, h) = light.get_location();
 
         if (status == 0) {
@@ -210,6 +212,18 @@ void RenderGenerator::render_a_frame(const std::vector<Agent *> &agents,
                 fout << "1" << " " << x+1 << " " << y+1 << " " << x+1 << " " << y + h << light_color[1 - status] << std::endl;
             else
                 fout << "1" << " " << x+1 << " " << y+1 << " " << x+1 << " " << y + h << white_color << std::endl;
+        }
+    }
+
+    for (auto road : roads) {
+        int dir = road.get_dir();
+        int x, y, w, h;
+        std::tie(x, y, w, h) = road.get_location();
+
+        if (dir == 0) {  // horizontal
+            fout << "1" << " " << x << " " << y + h/2 << " " << x + w << " " << y + h/2 << road_line_color << std::endl;
+        } else {  // vertical
+            fout << "1" << " " << x + w/2 << " " << y << " " << x + w/2 << " " << y + h << road_line_color << std::endl;
         }
     }
 

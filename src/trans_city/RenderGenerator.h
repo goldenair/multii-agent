@@ -28,7 +28,8 @@ public:
                         const std::vector<Position> &walls,
                         const std::vector<TrafficLight> &lights,
                         const std::vector<Park> &parks,
-                        const std::vector<Building> &buildings);
+                        const std::vector<Building> &buildings,
+                        const std::vector<Road> &roads);
 
     std::string get_save_dir() {
         return save_dir;

@@ -21,6 +21,7 @@ TransCity::TransCity() {
     interval_max = 20;
 
     reward_scale = 2;
+    ban_penalty = -0.3f;
 }
 
 TransCity::~TransCity() {
@@ -30,6 +31,7 @@ TransCity::~TransCity() {
 
 void TransCity::reset() {
     id_counter = 0;
+    dis_inited = false;
 
 
     lights.clear();
@@ -37,6 +39,7 @@ void TransCity::reset() {
     parks.clear();
     walls.clear();
     buildings.clear();
+    distants.clear();
 
     map.reset(walls, width, height);
     render_generator.next_file();
@@ -67,6 +70,8 @@ void TransCity::set_config(const char *key, void *p_value) {
         interval_max = ivalue;
     else if (strequ(key, "reward_scale"))
         reward_scale = fvalue;
+    else if (strequ(key, "ban_penalty"))
+        reward_scale = fvalue;
 
     else if (strequ(key, "embedding_size"))
         embedding_size = ivalue;
@@ -81,6 +86,8 @@ void TransCity::set_config(const char *key, void *p_value) {
 }
 
 void TransCity::add_object(int obj_id, int n, const char *method, const int *linear_buffer) {
+    if (dis_inited)
+        assert(obj_id >= 0);
     if (obj_id == -1) { // wall
         if (strequ(method, "custom")) {
             NDPointer<const int, 2> buf(linear_buffer, {{n, 2}});
@@ -165,9 +172,36 @@ void TransCity::add_object(int obj_id, int n, const char *method, const int *lin
                 buildings.emplace_back(Building(Position{x0, y0}, w, h));
             }
         }
+    } else if (obj_id == -5) { // roads
+        if(strequ(method, "custom")) {
+            NDPointer<const int, 2> buf(linear_buffer, {{n, 2}});
+            for (int i = 0; i < n; i++) {
+                int x0 = buf.at(i, 0);
+                int y0 = buf.at(i, 1);
+                int w = buf.at(i, 2);
+                int h = buf.at(i, 3);
+                int dir = buf.at(i, 4);
+
+                roads.emplace_back(Road(Position{x0, y0}, w, h, dir));
+            }
+        }
     } else if (obj_id == 0) { // car
+        // init distance for all parks
         num_park = static_cast<int>(parks.size());
 
+        if (num_park <= 0 || num_park > MAX_COLOR_NUM)
+            LOG(FATAL) << "invalid number of park: " << num_park;
+
+        if (!dis_inited) {
+            dis_inited = true;
+            for (int i = 0; i < num_park; i++) {
+                distants.emplace_back(std::vector<int>(width * height, 0));
+            }
+            for (int i = 0; i < num_park; i++) {
+                map.calc_bfs(parks[i], distants[i]);
+            }
+            map.init_mask(roads, lights);
+        }
         if (strequ(method, "random")) {
             Position pos;
             for (int i = 0; i < n; i++) {
@@ -210,6 +244,11 @@ void TransCity::add_object(int obj_id, int n, const char *method, const int *lin
 }
 
 void TransCity::get_observation(GroupHandle group, float **linear_buffers) {
+    const int delta[][2] = {
+            {0, -1}, {1, -1}, {1, 0}, {1, 1},
+            {0, 1}, {-1, 1}, {-1, 0}, {-1, -1},
+    };
+
     const int n_channel = CHANNEL_NUM;
     const int n_action  = static_cast<int>(ACT_NUM);
     const int feature_size = get_feature_size_(group);
@@ -240,12 +279,22 @@ void TransCity::get_observation(GroupHandle group, float **linear_buffers) {
         // diff with goal
         Position pos = agent->get_pos();
         Position goal = agent->get_goal();
+        int color = agent->get_color();
         feature_buffer.at(i, embedding_size + n_action + 1) = 1.0f * pos.x / width;
         feature_buffer.at(i, embedding_size + n_action + 2) = 1.0f * pos.y / height;
         feature_buffer.at(i, embedding_size + n_action + 3) = 1.0f * goal.x / width;
         feature_buffer.at(i, embedding_size + n_action + 4) = 1.0f * goal.y / height;
-        feature_buffer.at(i, embedding_size + n_action + 5) = 1.0f * (pos.x - goal.x) / width;
-        feature_buffer.at(i, embedding_size + n_action + 6) = 1.0f * (pos.y - goal.y) / height;
+
+        float scale = 1.0f;
+        feature_buffer.at(i, embedding_size + n_action + 5) =
+                scale * (distants[color][map.pos2int(pos)]) / (width + height);
+        int base_dis = distants[color][map.pos2int(pos)];
+        for (int j = 0; j < 8; j++) {
+            Position new_pos{pos.x + delta[j][0], pos.y + delta[j][1]};
+            assert (map.in_board(pos.x, pos.y));
+            feature_buffer.at(i, embedding_size + n_action + 6 + j) =
+                    scale * (distants[color][map.pos2int(new_pos)] - base_dis);
+        }
     }
 }
 
@@ -260,10 +309,6 @@ void TransCity::set_action(GroupHandle group, const int *actions) {
 }
 
 void TransCity::step(int *done) {
-    const int delta[][2] = {
-            {1, 0}, {0, 1}, {-1, 0}, {0, -1},
-    };
-
     LOG(TRACE) << "step begin. ";
 
     LOG(TRACE) << "update lights. ";
@@ -283,14 +328,17 @@ void TransCity::step(int *done) {
         agent->add_reward(static_cast<float>(reward_scale *
                 (-fabs(pos.x - goal.x) - fabs(pos.y - goal.y)) / (width + height)) - 0.5f * reward_scale);
 
-        if (act > ACT_UP)
+        if (act >= ACT_NOP)
             continue;
         int dir = static_cast<int>(act);
 
-        int ret = map.do_move(agent, delta[dir], lines, lights);
+        int ret = map.do_move(agent, dir, lines, lights);
         if (ret == 1) { // park
             agent->add_reward(2 * reward_scale);
             agent->set_dead();
+        }
+        if (ret == -4) { // banned road
+            agent->add_reward(ban_penalty);
         }
     }
 
@@ -376,7 +424,7 @@ void TransCity::render() {
         first_render = false;
         render_generator.gen_config(width, height);
     }
-    render_generator.render_a_frame(agents, walls, lights, parks, buildings);
+    render_generator.render_a_frame(agents, walls, lights, parks, buildings, roads);
 }
 
 void TransCity::render_next_file() {
@@ -388,7 +436,7 @@ void TransCity::render_next_file() {
  */
 int TransCity::get_feature_size_(GroupHandle group) {
     // embedding + last_action + last_reward + goal
-    return embedding_size + static_cast<int>(ACT_NUM) + 1 + 6;
+    return embedding_size + static_cast<int>(ACT_NUM) + 1 + 4 + 9;
 }
 
 

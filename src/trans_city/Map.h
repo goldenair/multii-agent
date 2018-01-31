@@ -23,6 +23,7 @@ struct Slot {
     OccType occ_type;
     void *occupier;
     int occ_ct;
+    short mask;
 };
 
 class Map {
@@ -40,9 +41,12 @@ public:
     Position get_random_blank(std::default_random_engine &random_engine);
     void extract_view(const Agent* agent, float *linear_buffer, int height, int width, int channel);
 
-    int do_move(Agent *agent, const int *delta,
+    int do_move(Agent *agent, int dir,
                 const std::map<std::pair<Position, Position>, TrafficLine> &lines,
                 const std::vector<TrafficLight> &lights);
+
+    void calc_bfs(Park &source, std::vector<int> &ret);
+    void init_mask(std::vector<Road> &roads, std::vector<TrafficLight> &lights);
 
     /**
      * Utility

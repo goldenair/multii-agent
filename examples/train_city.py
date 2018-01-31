@@ -6,6 +6,7 @@ import argparse
 import logging as log
 import random
 import time
+import copy
 
 import numpy as np
 
@@ -25,215 +26,244 @@ def get_config(map_size):
     cfg.set({"map_width": map_size, "map_height": map_size})
     cfg.set({"view_width": 9, "view_height": 9})
     cfg.set({"embedding_size": 10})
-    cfg.set({"reward_scale": 2})
+    cfg.set({"reward_scale": 2, 'ban_penalty': -0.3})
 
     return cfg
 
 
 def generate_map(env, map_size, handles):
     """ generate a map, which consists of two squares of agents and vertical lines"""
-    build_width = 10
-    build_height = 10
+    agent_dense = 0.1
+    num_park = 18
 
-    road_width = 4
-    road_height = road_width
-    num_park = 20
-    car_dense = 0.08
-    max_building_width = 8
-    block_dense = 0.4
+    building_min_height = 8
+    building_max_height = 50
+    building_min_width = 8
+    building_max_width = 50
+    major_road_height = 8
+    major_road_width = 8
+    minor_road_height = 4
+    minor_road_width = 4
 
-    width_margin = -1
-    for width in range(max_building_width - 2, max_building_width):
-        current_margin = (map_size - 2 - road_width) % (width + road_width)
-        if current_margin % 2 == 0:
-            if current_margin <= 2:
-                build_width = width
-                width_margin = current_margin
-                break
-            if width_margin == -1 or width_margin > current_margin:
-                width_margin = current_margin
-                build_width = width
+    major_road_wnum = 2
+    major_road_hnum = 2
 
-    height_margin = -1
-    for height in range(max_building_width - 2, max_building_width):
-        current_margin = (map_size - 2 - road_width) % (height + road_width)
-        if current_margin % 2 == 0:
-            if current_margin <= 2:
-                build_height = height
-                height_margin = current_margin
-                break
-            if height_margin == -1 or height_margin > current_margin:
-                height_margin = current_margin
-                build_height = height
+    margin_width = 2
+    margin_height = 2
 
+    margin_width += 1
+    margin_height += 1
+
+    max_merge_failure_times = 100
+
+    building_pos = []
     light_pos = []
-    width_margin /= 2
-    height_margin /= 2
-    width_num = 0
-    height_num = 0
-    banned = dict()
-    build_pos = dict()
-    for x in range(width_margin + road_width + 1, map_size - road_width - width_margin, build_width + road_width):
-        for y in range(height_margin + road_height + 1,
-                       map_size - road_height - height_margin, build_height + road_height):
-            build_pos.setdefault((x, y, build_width, build_height), True)
-            banned.setdefault((x - 1 + build_width, y - 1 + build_height), [False] * 8)
-            banned[(x - 1 + build_width, y - 1 + build_height)][4] = True
-            banned.setdefault((x - (build_width + road_width) - 1 + build_width, y - 1 + build_height), [False] * 8)
-            banned[(x - (build_width + road_width) - 1 + build_width, y - 1 + build_height)][5] = True
-            banned.setdefault((x - 1 + build_width, y - (build_height + road_height) - 1 + build_height), [False] * 8)
-            banned[(x - 1 + build_width, y - (build_height + road_height) - 1 + build_height)][7] = True
-            banned.setdefault((x - (build_width + road_width) - 1 + build_width,
-                               y - (build_height + road_height) - 1 + build_height), [False] * 8)
-            banned[(x - (build_width + road_width) - 1 + build_width,
-                    y - (build_height + road_height) - 1 + build_height)][6] = True
-            if height_num == 0:
-                width_num += 1
-        height_num += 1
 
-    def delblock(x, y):
-        if (x, y, build_width, build_height) in build_pos:
-            del build_pos[(x, y, build_width, build_height)]
-        banned.setdefault((x - 1 + build_width, y - 1 + build_height), [False] * 8)
-        banned[(x - 1 + build_width, y - 1 + build_height)][4] = False
-        banned.setdefault((x - (build_width + road_width) - 1 + build_width, y - 1 + build_height), [False] * 8)
-        banned[(x - (build_width + road_width) - 1 + build_width, y - 1 + build_height)][5] = False
-        banned.setdefault((x - 1 + build_width, y - (build_height + road_height) - 1 + build_height), [False] * 8)
-        banned[(x - 1 + build_width, y - (build_height + road_height) - 1 + build_height)][7] = False
-        banned.setdefault((x - (build_width + road_width) - 1 + build_width,
-                           y - (build_height + road_height) - 1 + build_height), [False] * 8)
-        banned[(x - (build_width + road_width) - 1 + build_width,
-                y - (build_height + road_height) - 1 + build_height)][6] = False
+    map_width = map_size - margin_width * 2
+    map_height = map_size - margin_height * 2
 
-    for y_index in range(width_num):
-        x = (width_num - 1) // 3 * (build_width + road_width) + width_margin + road_width + 1
-        y = y_index * (build_height + road_height) + height_margin + road_height + 1
-        delblock(x, y)
-        x = (width_num - 1) // 3 * 2 * (build_width + road_width) + width_margin + road_width + 1
-        y = y_index * (build_height + road_height) + height_margin + road_height + 1
-        delblock(x, y)
+    assert \
+        (map_width - 2 * minor_road_width - major_road_wnum * major_road_width) % (major_road_wnum + 1) == 0, \
+        (map_width - 2 * minor_road_width - major_road_wnum * major_road_width) % (major_road_wnum + 1)
+    assert \
+        (map_height - 2 * minor_road_height - major_road_hnum * major_road_height) % (major_road_hnum + 1) == 0, \
+        (map_height - 2 * minor_road_height - major_road_hnum * major_road_height) % (major_road_hnum + 1)
 
-    for x_index in range(width_num):
-        x = x_index * (build_width + road_width) + width_margin + road_width + 1
-        y = (height_num - 1) // 3 * (build_height + road_height) + height_margin + road_height + 1
-        delblock(x, y)
-        x = x_index * (build_width + road_width) + width_margin + road_width + 1
-        y = (height_num - 1) // 3 * 2 * (build_height + road_height) + height_margin + road_height + 1
-        delblock(x, y)
+    block_width = (map_width - 2 * minor_road_width - major_road_wnum * major_road_width) / (major_road_wnum + 1)
+    block_height = (map_height - 2 * minor_road_height - major_road_hnum * major_road_height) / (major_road_hnum + 1)
 
-    extra_block = []
-    block_num = int(len(build_pos.keys()) * block_dense)
-    for _ in range(block_num):
-        while True:
-            x = random.randint(0, width_num - 2) * (build_width + road_width) + width_margin + road_width + 1
-            y = random.randint(0, height_num - 2) * (build_height + road_height) + height_margin + road_height + 1
-            if (x, y, build_width, build_height) in build_pos:
-                break
-        if random.random() <= 0.5:
-            if (x + road_width + build_width, y, build_width, build_height) not in build_pos.keys():
-                continue
-            extra_block.append([x + build_width, y, road_width, build_height])
-            banned.setdefault((x - 1 + build_width, y - 1 + build_height), [False] * 8)
-            banned[(x - 1 + build_width, y - 1 + build_height)][0] = True
-            y -= road_height + build_height
-            banned.setdefault((x - 1 + build_width, y - 1 + build_height), [False] * 8)
-            banned[(x - 1 + build_width, y - 1 + build_height)][2] = True
-        else:
-            if (x, y + build_height + road_height, build_width, build_height) not in build_pos.keys():
-                continue
-            extra_block.append([x, y + build_height, build_width, road_height])
-            banned.setdefault((x - 1 + build_width, y - 1 + build_height), [False] * 8)
-            banned[(x - 1 + build_width, y - 1 + build_height)][3] = True
-            x -= road_width + build_width
-            banned.setdefault((x - 1 + build_width, y - 1 + build_height), [False] * 8)
-            banned[(x - 1 + build_width, y - 1 + build_height)][1] = True
+    building_width = None
+    print(block_width)
+    for width in range(building_min_width, building_max_width + 1):
+        if (block_width + minor_road_width) % (width + minor_road_width) == 0:
+            building_width = width
+            break
+    assert building_width is not None
 
-    def get_status(block_status):
-        status = [True] * 4
-        if block_status[0]:
-            status[0] = False
-        if block_status[1]:
-            status[1] = False
-        if block_status[2]:
-            status[2] = False
-        if block_status[3]:
-            status[3] = False
-        if not block_status[4] or not block_status[5]:
-            status[0] = False
-        if not block_status[5] or not block_status[6]:
-            status[1] = False
-        if not block_status[6] or not block_status[7]:
-            status[2] = False
-        if not block_status[7] or not block_status[4]:
-            status[3] = False
-        return status
+    building_height = None
+    for height in range(building_min_height, building_max_height + 1):
+        if (block_height + minor_road_height) % (height + minor_road_height) == 0:
+            building_height = height
+            break
+    assert building_height is not None
 
-    for x in range(width_margin + road_width + 1, map_size - road_width - width_margin, build_width + road_width):
-        for y in range(height_margin + road_height + 1,
-                       map_size - road_height - height_margin, build_height + road_height):
-            if x - 1 + build_width * 2 + road_width * 2 + width_margin < map_size and \
-                                                            y - 1 + build_height * 2 + road_height * 2 + height_margin < map_size:
-                status = get_status(banned[(x - 1 + build_width, y - 1 + build_height)])
-                if sum(status) == 0:
+    block_building_wnum = (block_width + minor_road_width) // (building_width + minor_road_width)
+    block_building_hnum = (block_height + minor_road_height) // (building_height + minor_road_height)
+
+    region_buildings = []
+    for i in range(major_road_wnum + 1):
+        tmp_buildings = []
+        for j in range(major_road_hnum + 1):
+            block_x = margin_width + minor_road_width + i * (block_width + major_road_width)
+            block_y = margin_height + minor_road_height + j * (block_height + major_road_height)
+            current_buildings = []
+            for k in range(block_building_wnum):
+                for l in range(block_building_hnum):
+                    current_buildings.append((k, l))
+
+            counter = 0
+            current_available_buildings = []
+            while current_buildings:
+                x, y = current_buildings[np.random.choice(len(current_buildings))]
+                w = np.random.randint(0, block_building_wnum - x)
+                h = np.random.randint(0, block_building_hnum - y)
+                if w == 0 and h == 0 and counter <= max_merge_failure_times:
+                    counter += 1
                     continue
-                res = 0
-                for i in range(len(status)):
-                    res |= status[i] << i
-                assert res != 0
-                light_pos.append([x - 1 + build_width, y - 1 + build_height, road_width + 1, road_height + 1, res])
+                checked = True
+                for k in range(w + 1):
+                    for l in range(h + 1):
+                        if (x + k, y + l) not in current_buildings:
+                            checked = False
+                if checked:
+                    building_x = block_x + x * (building_width + minor_road_width)
+                    building_y = block_y + y * (building_height + minor_road_height)
+                    for k in range(w + 1):
+                        for l in range(h + 1):
+                            current_buildings.remove((x + k, y + l))
+                    current_available_buildings.append((
+                        building_x, building_y,
+                        (w + 1) * building_width + w * minor_road_width,
+                        (h + 1) * building_height + h * minor_road_height))
 
-    park_available_pos = []
-    for pos in build_pos:
-        available = False
-        if (pos[0] + build_width + road_width, pos[1], pos[2], pos[3]) not in build_pos:
-            available = True
-        if (pos[0] - build_width - road_width, pos[1], pos[2], pos[3]) not in build_pos:
-            available = True
-        if (pos[0], pos[1] - build_height - road_height, pos[2], pos[3]) not in build_pos:
-            available = True
-        if (pos[0], pos[1] + build_height + road_height, pos[2], pos[3]) not in build_pos:
-            available = True
-        if available:
-            park_available_pos.append(pos)
-    parks_id = np.random.choice(range(len(park_available_pos)), size=num_park, replace=False)
-    build_pos = build_pos.keys() + extra_block
+            building_pos += current_available_buildings
+            tmp_buildings.append(current_available_buildings)
 
-    def f(loc):
-        return loc[0] + loc[2] < map_size and loc[1] + loc[3] < map_size
+            for k in range(block_building_wnum - 1):
+                for l in range(block_building_hnum - 1):
+                    sx = block_x + k * (building_width + minor_road_width) + building_width - 1
+                    sy = block_y + l * (building_height + minor_road_height) + building_height - 1
+                    ex = sx + minor_road_width + 1
+                    ey = sy + minor_road_height + 1
+                    checked = [True] * 4
+                    for x, y, w, h in current_available_buildings:
+                        if x + w - 1 == sx and y <= sy and ey <= y + h - 1:
+                            checked[3] = False
+                        if y + h - 1 == sy and x <= sx and ex <= x + w - 1:
+                            checked[0] = False
+                        if x == ex and y <= sy and ey <= y + h - 1:
+                            checked[1] = False
+                        if y == ey and x <= sx and ex <= x + w - 1:
+                            checked[2] = False
+                        if x <= sx and ex <= x + w - 1 and y <= sy and ey <= y + h - 1:
+                            checked[0] = checked[1] = checked[2] = checked[3] = False
+                            break
+                    if sum(checked) >= 3:
+                        mask = 0
+                        for it in range(4):
+                            mask |= checked[it] << it
+                        light_pos.append((sx, sy, minor_road_width + 1, minor_road_height + 1, mask))
+                    else:
+                        if checked[0] and checked[2]:
+                            env.add_roads(method='custom', pos=[[sx + 1, sy + 1, ex - sx - 1, ey - sy - 1, 1]])
+                        elif checked[1] and checked[3]:
+                            env.add_roads(method='custom', pos=[[sx + 1, sy + 1, ex - sx - 1, ey - sy - 1, 0]])
+            for k in range(block_building_wnum):
+                for l in range(block_building_hnum):
+                    sx = block_x + k * (building_width + minor_road_width) + building_width
+                    sy = block_y + l * (building_height + minor_road_height)
+                    ex = sx + minor_road_width - 1
+                    ey = sy + building_height - 1
+                    if ex <= block_x + block_width - 1 and ey <= block_y + block_height - 1:
+                        checked = True
+                        for x, y, w, h in current_available_buildings:
+                            if x <= sx and ex <= x + w - 1 and y <= sy and ey <= y + h - 1:
+                                checked = False
+                                break
+                        if checked:
+                            env.add_roads(method='custom', pos=[[sx, sy, minor_road_width, building_height, 1]])
+                    sx = block_x + k * (building_width + minor_road_width)
+                    sy = block_y + l * (building_height + minor_road_height) + building_height
+                    ex = sx + building_width - 1
+                    ey = sy + minor_road_height - 1
+                    if ex <= block_x + block_width - 1 and ey <= block_y + block_height - 1:
+                        checked = True
+                        for x, y, w, h in current_available_buildings:
+                            if x <= sx and ex <= x + w - 1 and y <= sy and ey <= y + h - 1:
+                                checked = False
+                                break
+                        if checked:
+                            env.add_roads(method='custom', pos=[[sx, sy, building_width, minor_road_height, 0]])
+        region_buildings.append(tmp_buildings)
 
-    build_pos = filter(f, build_pos)
-    light_pos = filter(f, light_pos)
+    for i in range(major_road_wnum + 1):
+        for j in range(major_road_hnum + 1):
+            block_x = margin_width + minor_road_width + i * (block_width + major_road_width)
+            block_y = margin_height + minor_road_height + j * (block_height + major_road_height)
+            if i < major_road_wnum:
+                for k in range(block_building_hnum):
+                    if k < block_building_hnum - 1:
+                        sx = block_x + block_width - 1
+                        sy = block_y + k * (building_height + minor_road_height) + building_height - 1
+                        ex = sx + major_road_width + 1
+                        ey = sy + minor_road_width + 1
+                        checked = [True] * 4
+                        for x, y, w, h in region_buildings[i][j]:
+                            if sx == x + w - 1 and y <= sy and ey <= y + h - 1:
+                                checked[3] = False
+                        for x, y, w, h in region_buildings[i + 1][j]:
+                            if ex == x and y <= sy and ey <= y + h - 1:
+                                checked[1] = False
+                        if sum(checked) >= 3:
+                            mask = 0
+                            for it in range(4):
+                                mask |= checked[it] << it
+                            light_pos.append((sx, sy, major_road_width + 1, minor_road_height + 1, mask))
+                        else:
+                            env.add_roads(method='custom', pos=[[sx + 1, sy + 1, major_road_width, minor_road_height, 0]])
+
+                    sx = block_x + block_width
+                    sy = block_y + k * (building_height + minor_road_height)
+                    env.add_roads(method='custom', pos=[[sx, sy, major_road_width, building_height, 1]])
+            if j < major_road_hnum:
+                for k in range(block_building_wnum):
+                    if k < block_building_wnum - 1:
+                        sx = block_x + k * (building_width + minor_road_width) + building_width - 1
+                        sy = block_y + block_height - 1
+                        ex = sx + minor_road_width + 1
+                        ey = sy + major_road_height + 1
+                        checked = [True] * 4
+                        for x, y, w, h in region_buildings[i][j]:
+                            if sy == y + h - 1 and x <= sx and ex <= x + w - 1:
+                                checked[0] = False
+                        for x, y, w, h in region_buildings[i][j + 1]:
+                            if ey == y and x <= sx and ex <= x + w - 1:
+                                checked[2] = False
+                        if sum(checked) >= 3:
+                            mask = 0
+                            for it in range(4):
+                                mask |= checked[it] << it
+                            light_pos.append((sx, sy, minor_road_width + 1, major_road_height + 1, mask))
+                        else:
+                            env.add_roads(method='custom', pos=[[sx + 1, sy + 1, minor_road_width, major_road_height, 0]])
+
+                    sx = block_x + k * (building_width + minor_road_width)
+                    sy = block_y + block_height
+                    env.add_roads(method='custom', pos=[[sx, sy, building_width, major_road_height, 0]])
+            if i < major_road_hnum and j < major_road_hnum:
+                light_pos.append((
+                    margin_width + minor_road_width + block_width * (i + 1) + major_road_width * i - 1,
+                    margin_height + minor_road_height + block_height * (j + 1) + major_road_height * j - 1,
+                    major_road_width + 1,
+                    major_road_height + 1,
+                    15
+                ))
 
     filled = set()
-    for pos in build_pos + light_pos:
+    for pos in building_pos + light_pos:
         x0, y0, w, h = pos[:4]
         for x in range(x0, x0 + w):
             for y in range(y0, y0 + h):
                 filled.add((x, y))
 
-    def get_park(p):
-        result = [p[0], p[1], p[2], p[3]]
-        modified = False
-        if [p[0] + build_width, p[1], road_width, build_height] in extra_block:
-            result[2] += road_width
-            modified = True
-        if [p[0] - road_width, p[1], road_width, build_height] in extra_block:
-            result[0] -= road_width
-            result[2] += road_width
-            modified = True
-        if not modified:
-            if [p[0], p[1] + build_height, build_width, road_height] in extra_block:
-                result[3] += road_height
-            if [p[0], p[1] - road_height, build_width, road_height] in extra_block:
-                result[1] -= road_height
-                result[3] += road_height
-        return result
+    building_pos = np.array(building_pos)
+    env.add_buildings(method='custom', pos=building_pos)
+    index = np.arange(len(building_pos))
+    env.add_parks(method="custom", pos=building_pos[np.random.choice(index, num_park)])
+    env.add_traffic_lights(method='custom', pos=light_pos)
 
-    env.add_buildings(method="custom", pos=build_pos)
-    env.add_parks(method='custom', pos=[get_park(park_available_pos[i]) for i in parks_id])
-    env.add_traffic_lights(method="custom", pos=light_pos)
+    n = map_size * map_size * agent_dense
 
-    n = map_size * map_size * car_dense
     env.add_agents(method="random", n=n)
 
     return filled, n
@@ -316,7 +346,7 @@ def play_a_round(env, map_size, handles, models, print_every, train=True, render
         nums = [env.get_num(handle) for handle in handles]
 
         # add new cars
-        if nums[0] < max_car_num:
+        if nums[0] < max_car_num and False:
             env.add_agents(method="custom", pos=get_enter_pos(map_size, filled,
                                                               max_car_num - nums[0]))
 
@@ -325,7 +355,7 @@ def play_a_round(env, map_size, handles, models, print_every, train=True, render
                   (step_ct, nums, np.around(step_reward, 2), np.around(total_reward, 2),
                    sum(begin_nums) - sum(nums)))
         step_ct += 1
-        if step_ct > 300:
+        if step_ct > 400:
             break
 
     sample_time = time.time() - start_time
@@ -354,7 +384,7 @@ if __name__ == "__main__":
     parser.add_argument("--render", action="store_true")
     parser.add_argument("--load_from", type=int)
     parser.add_argument("--train", action="store_true")
-    parser.add_argument("--map_size", type=int, default=201)
+    parser.add_argument("--map_size", type=int, default=198)
     parser.add_argument("--greedy", action="store_true")
     parser.add_argument("--name", type=str, default="city")
     parser.add_argument("--eval", action="store_true")
@@ -370,7 +400,7 @@ if __name__ == "__main__":
 
     # init models
     batch_size = 256
-    target_update = 1000
+    target_update = 2000
     train_freq = 5
 
     handles = [0]

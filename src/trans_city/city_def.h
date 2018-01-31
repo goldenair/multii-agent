@@ -19,13 +19,18 @@ struct Position {
     bool operator < (const Position &other) const {
         return x < other.x || ((x == other.x) && y < other.y);
     }
+
+    bool operator == (const Position &other) const {
+        return x == other.x && y == other.y;
+    }
 };
 
 typedef int PositionInteger;
 
-typedef enum {ACT_RIGHT, ACT_DOWN, ACT_LEFT, ACT_UP, ACT_NOOP, ACT_NUM} Action;
+typedef enum {ACT_UP, ACT_RIGHTUP, ACT_RIGHT, ACT_RIGHTDOWN, ACT_DOWN,
+              ACT_LEFTDOWN, ACT_LEFT, ACT_LEFTUP, ACT_NOP, ACT_NUM} Action;
 
-enum {CHANNEL_WALL, CHANNEL_LIGHT, CHANNEL_PARK, CHANNEL_SELF, CHANNEL_OTHER, CHANNEL_NUM};
+enum {CHANNEL_WALL, CHANNEL_LIGHT, CHANNEL_PARK_SELF, CHANNEL_PARK_OTHER, CHANNEL_SELF, CHANNEL_OTHER, CHANNEL_NUM};
 
 const int MAX_COLOR_NUM = 20;
 
@@ -35,6 +40,7 @@ class Agent;
 class TrafficLight;
 class TrafficLine;
 class Park;
+class Road;
 class Building;
 
 using ::magent::environment::Environment;

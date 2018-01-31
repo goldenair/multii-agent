@@ -25,7 +25,7 @@ class TransCity(Environment):
         config_value_type = {
             'map_width': int, 'map_height': int,
             'view_width': int, 'view_height': int,
-            'reward_scale': float,
+            'reward_scale': float, 'ban_penalty': float,
             'embedding_size': int, 'seed': int,
             'render_dir': str,
         }
@@ -87,6 +87,9 @@ class TransCity(Environment):
     def add_buildings(self, method, **kwargs):
         # handle = -4 for building
         self._add_object(-4, method, **kwargs)
+
+    def add_roads(self, method, **kwargs):
+        self._add_object(-5, method, **kwargs)
 
     def add_agents(self, method, **kwargs):
         self._add_object(0, method, **kwargs)
